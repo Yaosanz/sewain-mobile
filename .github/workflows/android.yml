@@ -1,0 +1,55 @@
+name: Android CI
+
+on:
+  push:
+    branches: [ "dev" ]
+  pull_request:
+    branches: [ "dev" ]
+
+jobs:
+  build:
+
+    runs-on: ubuntu-latest
+    env:
+      MAPS_API_KEY: ${{ secrets.MAPS_API_KEY }}
+    steps:
+    - uses: actions/checkout@v3
+    - name: set up JDK 17
+      uses: actions/setup-java@v3
+      with:
+        java-version: '17'
+        distribution: 'temurin'
+        cache: gradle
+    - name: Create local.properties
+      run: |
+        echo "sdk.dir=/usr/local/lib/android/sdk" > local.properties
+
+    - name: Grant execute permission for gradlew
+      run: chmod +x gradlew
+    - name: Build with Gradle
+      run: ./gradlew assembleDebug
+
+    - name: Set up Google Cloud SDK
+      uses: google-github-actions/setup-gcloud@v0.2.0
+      with:
+        project_id: ${{ secrets.GCP_PROJECT_ID }}
+        service_account_key: ${{ secrets.GCP_SA_KEY }}
+        export_default_credentials: true
+    - name: Upload APK to GCP
+      run: |
+          COMMIT_ID=$(echo ${{ github.sha }} | cut -c1-7)
+          gsutil cp app/build/outputs/apk/debug/app-debug.apk gs://sewain/apk/release/apk-release.apk
+
+    - name: Send Notification to Discord
+      env:
+          DISCORD_WEBHOOK_URL: ${{ secrets.DISCORD_WEBHOOK_URL }}
+      run: |
+          COMMIT_ID=$(echo ${{ github.sha }} | cut -c1-7)
+          GCP_BUCKET_URL="https://storage.googleapis.com/sewain/apk/debug/app-debug-${COMMIT_ID}.apk"
+          COMMIT_MSG=$(echo "${{ github.event.head_commit.message }}")
+          curl -H "Content-Type: application/json" \
+               -X POST \
+               -d "{\"content\": \"New APK uploaded: ${GCP_BUCKET_URL}\nCommit: ${COMMIT_MSG}\"}" \
+               $DISCORD_WEBHOOK_URL
+    
+      
